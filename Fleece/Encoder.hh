@@ -120,7 +120,9 @@ namespace fleece {
         Encoder& operator<< (uint64_t i)        {writeUInt(i); return *this;}
         Encoder& operator<< (int i)             {writeInt(i); return *this;}
         Encoder& operator<< (unsigned i)        {writeUInt(i); return *this;}
+#if !UINTPTR_MAX == 0xffffffffffffffff && defined(__linux__)       
         Encoder& operator<< (unsigned long i)   {writeUInt(i); return *this;}
+#endif        
         Encoder& operator<< (double d)          {writeDouble(d); return *this;}
         Encoder& operator<< (float f)           {writeFloat(f); return *this;}
         Encoder& operator<< (const std::string &str)   {writeString(str); return *this;}
