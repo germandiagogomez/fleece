@@ -13,6 +13,7 @@
 namespace fleece {
 
     class Dict;
+    class SharedKeys;
 
     /** A Value that's an array. */
     class Array : public Value {
@@ -94,6 +95,8 @@ namespace fleece {
             (as they are by default.) */
         const Value* get(slice keyToFind) const noexcept;
 
+        const Value* get(slice keyToFind, SharedKeys*) const noexcept;
+
         /** Looks up the Value for an integer key, assuming the keys are sorted
             (as they are by default.) */
         const Value* get(int numericKeyToFind) const noexcept;
@@ -115,10 +118,12 @@ namespace fleece {
         class iterator {
         public:
             iterator(const Dict*) noexcept;
+            iterator(const Dict*, const SharedKeys*) noexcept;
 
             /** Returns the number of _remaining_ items. */
             uint32_t count() const noexcept                  {return _a._count;}
 
+            slice keyString() const noexcept;
             const Value* key() const noexcept                {return _key;}
             const Value* value() const noexcept              {return _value;}
 
@@ -138,10 +143,13 @@ namespace fleece {
 
             Array::impl _a;
             const Value *_key, *_value;
+            const SharedKeys *_sharedKeys {nullptr};
+
             friend class Value;
         };
         
         iterator begin() const noexcept                      {return iterator(this);}
+        iterator begin(const SharedKeys *sk) const noexcept  {return iterator(this, sk);}
 
         /** An abstracted key for dictionaries. It will cache the key as an encoded Value, and it
             will cache the index at which the key was last found, which speeds up succssive
@@ -152,8 +160,11 @@ namespace fleece {
             stored in the same encoded data. */
         class key {
         public:
-            key(slice rawString, bool cachePointer = false) noexcept
-            :_rawString(rawString), _cachePointer(cachePointer) { }
+            key(slice rawString);
+
+            /** If the data was encoded using a SharedKeys mapping, you need to use this
+                constructor so the proper numeric encoding can be found & used. */
+            key(slice rawString, SharedKeys*, bool cachePointer =false);
 
             slice string() const noexcept                {return _rawString;}
             const Value* asValue() const noexcept        {return _keyValue;}
@@ -161,8 +172,11 @@ namespace fleece {
         private:
             slice const _rawString;
             const Value* _keyValue  {nullptr};
+            SharedKeys* _sharedKeys {nullptr};
             uint32_t _hint          {0xFFFFFFFF};
+            int32_t _numericKey;
             bool _cachePointer;
+            bool _hasNumericKey     {false};
 
             template <bool WIDE> friend struct dictImpl;
         };

@@ -14,6 +14,7 @@
 //  and limitations under the License.
 
 #include "Fleece_C_impl.hh"
+#include "Fleece.h"
 
 
 namespace fleece {
@@ -45,6 +46,7 @@ uint64_t FLValue_AsUnsigned(FLValue v)          {return v ? v->asUnsigned() : 0;
 float FLValue_AsFloat(FLValue v)                {return v ? v->asFloat() : 0.0;}
 double FLValue_AsDouble(FLValue v)              {return v ? v->asDouble() : 0.0;}
 FLSlice FLValue_AsString(FLValue v)             {return v ? v->asString() : nullslice;}
+FLSlice FLValue_AsData(FLValue v)               {return v ? v->asData() : nullslice;}
 FLArray FLValue_AsArray(FLValue v)              {return v ? v->asArray() : nullptr;}
 FLDict FLValue_AsDict(FLValue v)                {return v ? v->asDict() : nullptr;}
 
@@ -136,6 +138,10 @@ uint32_t FLDict_Count(FLDict d)                          {return d ? d->count() 
 FLValue FLDict_Get(FLDict d, FLSlice keyString)          {return d ? d->get(keyString) : nullptr;}
 FLValue FLDict_GetUnsorted(FLDict d, FLSlice keyString)  {return d ? d->get_unsorted(keyString) : nullptr;}
 
+FLValue FLDict_GetSharedKey(FLDict d, FLSlice keyString, FLSharedKeys sk) {
+    return d ? d->get(keyString, sk) : nullptr;
+}
+
 void FLDictIterator_Begin(FLDict d, FLDictIterator* i) {
     static_assert(sizeof(FLDictIterator) >= sizeof(Dict::iterator), "FLDictIterator is too small");
     new (i) Dict::iterator(d);
@@ -161,7 +167,14 @@ bool FLDictIterator_Next(FLDictIterator* i) {
 FLDictKey FLDictKey_Init(FLSlice string, bool cachePointers) {
     FLDictKey key;
     static_assert(sizeof(FLDictKey) >= sizeof(Dict::key), "FLDictKey is too small");
-    new (&key) Dict::key(string, cachePointers);
+    new (&key) Dict::key(string, nullptr, cachePointers);
+    return key;
+}
+
+FLDictKey FLDictKey_InitWithSharedKeys(FLSlice string, FLSharedKeys sharedKeys) {
+    FLDictKey key;
+    static_assert(sizeof(FLDictKey) >= sizeof(Dict::key), "FLDictKey is too small");
+    new (&key) Dict::key(string, (SharedKeys*)sharedKeys, false);
     return key;
 }
 
@@ -204,6 +217,9 @@ void FLEncoder_Free(FLEncoder e)                         {
     delete e;
 }
 
+void FLEncoder_SetSharedKeys(FLEncoder e, FLSharedKeys sk) {
+    e->setSharedKeys(sk);
+}
 
 #define ENCODER_TRY(METHOD) \
     try{ \

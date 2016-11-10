@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "0800"
+   LastUpgradeVersion = "0810"
    version = "1.3">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -69,6 +69,10 @@
          </CommandLineArgument>
          <CommandLineArgument
             argument = "[.Perf]"
+            isEnabled = "NO">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "&quot;Obj-C PerfSerialize&quot;"
             isEnabled = "YES">
          </CommandLineArgument>
       </CommandLineArguments>

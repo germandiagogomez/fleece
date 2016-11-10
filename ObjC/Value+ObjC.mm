@@ -1,5 +1,5 @@
 //
-//  Encoding+ObjC.mm
+//  Value+ObjC.mm
 //  Fleece
 //
 //  Created by Jens Alfke on 1/29/15.
@@ -16,20 +16,41 @@
 #import <Foundation/Foundation.h>
 #import "Value.hh"
 #include "Array.hh"
+#include "SharedKeys.hh"
 #include "FleeceException.hh"
+
+
+// NSMapXXX C API isn't available in iOS
+#if TARGET_OS_IPHONE
+#define MapGet(STRINGS, KEY)           [(STRINGS) objectForKey: (__bridge id)(KEY)]
+#define MapInsert(STRINGS, KEY, VALUE) [(STRINGS) setObject: (VALUE) \
+                                                     forKey: (__bridge id)(KEY)]
+#else
+#define MapGet(STRINGS, KEY)           (__bridge NSString*)NSMapGet((STRINGS), (KEY))
+#define MapInsert(STRINGS, KEY, VALUE) NSMapInsert((STRINGS), (KEY), (__bridge void*)(VALUE))
+#endif
 
 
 namespace fleece {
 
+    // Creates an NSMapTable that maps opaque pointers to Obj-C objects (NSStrings).
     NSMapTable* Value::createSharedStringsTable() noexcept {
         return [[NSMapTable alloc] initWithKeyOptions: NSPointerFunctionsOpaquePersonality |
                                                        NSPointerFunctionsOpaqueMemory
-                                         valueOptions: NSPointerFunctionsStrongMemory
+                                         valueOptions: NSPointerFunctionsObjectPersonality |
+                                                       NSPointerFunctionsStrongMemory
                                              capacity: 8];
     }
 
 
-    id Value::toNSObject(__unsafe_unretained NSMapTable *sharedStrings) const
+    static NSString* convertString(slice strSlice) {
+        auto str = (NSString*)strSlice;
+        throwIf(!str, InvalidData, "Invalid UTF-8 in string");
+        return str;
+    }
+
+
+    id Value::toNSObject(__unsafe_unretained NSMapTable *sharedStrings, const SharedKeys *sk) const
     {
         switch (type()) {
             case kNull:
@@ -53,36 +74,27 @@ namespace fleece {
                 }
             case kString: {
                 slice strSlice = asString();
-                bool shareable = (sharedStrings != nil
+                if (sharedStrings != nil
                                && strSlice.size >= internal::kMinSharedStringSize
-                               && strSlice.size <= internal::kMaxSharedStringSize);
-                if (shareable) {
-#if TARGET_OS_IPHONE
-                    NSString* str = [sharedStrings objectForKey: (__bridge id)this];
-#else
-                    NSString* str = (__bridge NSString*)NSMapGet(sharedStrings, this);
-#endif
-                    if (str)
-                        return str;
+                               && strSlice.size <= internal::kMaxSharedStringSize) {
+                    // Look up an existing shared string for this Value*:
+                    NSString* str = MapGet(sharedStrings, this);
+                    if (!str) {
+                        str = convertString(strSlice);
+                        MapInsert(sharedStrings, this, str);
+                    }
+                    return str;
+                } else {
+                    return convertString(strSlice);
                 }
-                NSString* str = (NSString*)strSlice;
-                throwIf(!str, InvalidData, "Invalid UTF-8 in string");
-                if (shareable) {
-#if TARGET_OS_IPHONE
-                    [sharedStrings setObject: str forKey: (__bridge id)this];
-#else
-                    NSMapInsert(sharedStrings, this, (__bridge void*)str);
-#endif
-                }
-                return str;
             }
             case kData:
-                return asString().copiedNSData();
+                return asData().copiedNSData();
             case kArray: {
                 auto iter = asArray()->begin();
                 auto result = [[NSMutableArray alloc] initWithCapacity: iter.count()];
                 for (; iter; ++iter) {
-                    [result addObject: iter->toNSObject(sharedStrings)];
+                    [result addObject: iter->toNSObject(sharedStrings, sk)];
                 }
                 return result;
             }
@@ -90,8 +102,24 @@ namespace fleece {
                 Dict::iterator iter(asDict());
                 auto result = [[NSMutableDictionary alloc] initWithCapacity: iter.count()];
                 for (; iter; ++iter) {
-                    NSString* key = iter.key()->toNSObject(sharedStrings);
-                    result[key] = iter.value()->toNSObject(sharedStrings);
+                    NSString* key = nil;
+                    if (iter.key()->isInteger() && sk) {
+                        // Decode int key using SharedKeys:
+                        auto encodedKey = (int)iter.key()->asInt();
+                        key = (__bridge NSString*)sk->platformStringForKey(encodedKey);
+                        if (!key) {
+                            slice strSlice = sk->decode(encodedKey);
+                            if (strSlice) {
+                                key = convertString(strSlice);
+                                sk->setPlatformStringForKey(encodedKey,
+                                                            CFRetain((__bridge CFStringRef)key));
+                                //TODO: Strings need to be CFRelease'd when the SharedKeys is destructed.
+                            }
+                        }
+                    }
+                    if (!key)
+                        key = iter.key()->toNSObject(sharedStrings, sk);
+                    result[key] = iter.value()->toNSObject(sharedStrings, sk);
                 }
                 return result;
             }

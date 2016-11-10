@@ -14,10 +14,11 @@
 //  and limitations under the License.
 
 #include "Array.hh"
+#include "SharedKeys.hh"
 #include "Internal.hh"
 #include "FleeceException.hh"
 #include "varint.hh"
-#include "MSVC_Compat.hh"
+#include "PlatformCompat.hh"
 #include <assert.h>
 #include <iostream>
 
@@ -170,7 +171,49 @@ namespace fleece {
             return deref(next(key));
         }
 
+        const bool lookupSharedKey(slice keyToFind, SharedKeys *sharedKeys, int &encoded) const noexcept {
+            if (sharedKeys->encode(keyToFind, encoded))
+                return true;
+            // Key is not known to my SharedKeys; see if dict contains any unknown keys:
+            if (_count == 0)
+                return false;
+            const Value *v = offsetby(_first, (_count-1)*2*kWidth);
+            do {
+                if (v->isInteger()) {
+                    if (sharedKeys->isUnknownKey((int)v->asInt())) {
+                        // Yup, try updating SharedKeys and re-encoding:
+                        sharedKeys->refresh();
+                        return sharedKeys->encode(keyToFind, encoded);
+                    }
+                    return false;
+                }
+            } while (--v >= _first);
+            return false;
+        }
+
+        inline const Value* get(slice keyToFind, SharedKeys *sharedKeys) const noexcept {
+            int encoded;
+            if (sharedKeys && lookupSharedKey(keyToFind, sharedKeys, encoded))
+                return get(encoded);
+            return get(keyToFind);
+        }
+
         const Value* get(Dict::key &keyToFind) const noexcept {
+            auto sharedKeys = keyToFind._sharedKeys;
+            if (sharedKeys) {
+                // Look for a numeric key first:
+                if (keyToFind._hasNumericKey)
+                    return get(keyToFind._numericKey);
+                // Key was not registered last we checked; see if dict contains any new keys:
+                if (_count == 0)
+                    return nullptr;
+                if (lookupSharedKey(keyToFind._rawString, sharedKeys, keyToFind._numericKey)) {
+                    keyToFind._hasNumericKey = true;
+                    return get(keyToFind._numericKey);
+                }
+            }
+
+            // Look up by string:
             const Value *key = findKeyByHint(keyToFind);
             if (!key) {
                 const Value *end = offsetby(_first, _count*2*kWidth);
@@ -186,7 +229,7 @@ namespace fleece {
     #define log(FMT, PARAM...) ({})
 #endif
 
-#if 0 // Set this to 1 to log innards of the method below
+#if 0 // Set this to 1 to log innards of the methods below
     #undef log
     #ifdef _MSC_VER
         // Can't get this to compile
@@ -387,8 +430,15 @@ namespace fleece {
     const Value* Dict::get(slice keyToFind) const noexcept {
         if (isWideArray())
             return dictImpl<true>(this).get(keyToFind);
+            else
+                return dictImpl<false>(this).get(keyToFind);
+                }
+    
+    const Value* Dict::get(slice keyToFind, SharedKeys *sk) const noexcept {
+        if (isWideArray())
+            return dictImpl<true>(this).get(keyToFind, sk);
         else
-            return dictImpl<false>(this).get(keyToFind);
+            return dictImpl<false>(this).get(keyToFind, sk);
     }
 
     const Value* Dict::get(int keyToFind) const noexcept {
@@ -430,6 +480,19 @@ namespace fleece {
         readKV();
     }
 
+    Dict::iterator::iterator(const Dict* d, const SharedKeys *sk) noexcept
+    :_a(d), _sharedKeys(sk)
+    {
+        readKV();
+    }
+
+    slice Dict::iterator::keyString() const noexcept {
+        slice keyStr = _key->asString();
+        if (!keyStr && _key->isInteger() && _sharedKeys)
+            keyStr = _sharedKeys->decode((int)_key->asInt());
+        return keyStr;
+    }
+
     Dict::iterator& Dict::iterator::operator++() {
         throwIf(_a._count == 0, OutOfRange, "iterating past end of dict");
         --_a._count;
@@ -452,6 +515,22 @@ namespace fleece {
             _value = deref(_a._first->next(_a._wide), _a._wide);
         } else {
             _key = _value = nullptr;
+        }
+    }
+
+
+    Dict::key::key(slice rawString)
+    :_rawString(rawString), _cachePointer(false)
+    { }
+
+
+    Dict::key::key(slice rawString, SharedKeys *sk, bool cachePointer)
+    :_rawString(rawString), _sharedKeys(sk), _cachePointer(cachePointer)
+    {
+        int n;
+        if (sk && sk->encode(rawString, n)) {
+            _numericKey = (uint32_t)n;
+            _hasNumericKey = true;
         }
     }
 
