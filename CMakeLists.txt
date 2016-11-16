@@ -2,7 +2,14 @@ cmake_minimum_required (VERSION 2.6)
 project (Fleece)
 
 set(COMPILE_FLAGS   "${COMPILE_FLAGS}   -Wall -Werror")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+
+if (NOT ${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+endif()
+
+if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
+	include_directories("C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.14393.0\\ucrt" SYSTEM)
+endif()
 
 # Debug/Release builds
 set(CMAKE_CXX_FLAGS_DEBUG   "${CMAKE_CXX_FLAGS_DEBUG}   -O0    -DDEBUG")
@@ -24,8 +31,11 @@ include_directories("Fleece"
                     "vendor/libb64" 
                     "vendor/jsonsl" )
 
-set_source_files_properties(Fleece/Fleece_C_impl.cc  PROPERTIES
+if (NOT ${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
+	set_source_files_properties(Fleece/Fleece_C_impl.cc  PROPERTIES
                             COMPILE_FLAGS  -Wno-return-type-c-linkage)
+endif()
+
 
 add_library(Fleece        SHARED  ${FLEECE_SRC})
 add_library(FleeceStatic  STATIC  ${FLEECE_SRC})
